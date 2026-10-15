@@ -16,6 +16,8 @@ class Server:
     def __init__(self, root, name):
         self.socket = str(root / name)
         self.tmux("-f", "/dev/null", "new-session", "-d", "-s", "main", "-x", "220", "-y", "64", "/bin/cat")
+        self.tmux("set-environment", "-g", "HOME", str(root))
+        self.tmux("set-environment", "-g", "ZDOTDIR", str(root))
         self.tmux("set", "-g", "default-shell", "/bin/sh")
         self.tmux("set", "-g", "default-command", "/bin/cat")
         self.env = dict(os.environ, HOME=str(root), TMUX=self.socket + "," + self.tmux("display", "-p", "#{pid}") + ",0", TMUX_PANE="%0")
@@ -153,6 +155,18 @@ def regressions(a, b, root):
     captured = a.tmux("capture-pane", "-p", "-t", child)
     assert "path_probe_ok" in captured and str(root) in captured
     a.cli("close", child)
+    if Path("/bin/zsh").exists():
+        a.tmux("set", "-g", "default-shell", "/bin/zsh")
+        (root / ".zshrc").write_text("alias cod='printf \"alias_cod:%s\\\\n\"'\nalias cla='printf \"alias_cla:%s\\\\n\"'\n")
+        for alias in ("cod", "cla"):
+            child = json.loads(a.cli("pane", "--", alias, "two words", "$(touch must_not_run)",
+                                    env=dict(a.env, ZDOTDIR=str(root))))["pane"]
+            a.shell_works(child)
+            captured = a.tmux("capture-pane", "-p", "-t", child)
+            assert "alias_" + alias + ":two words" in captured
+            assert "alias_" + alias + ":$(touch must_not_run)" in captured
+            a.cli("close", child)
+        a.tmux("set", "-g", "default-shell", "/bin/sh")
     print("Regression scenarios passed; original panes/processes and second server preserved.", flush=True)
 
 

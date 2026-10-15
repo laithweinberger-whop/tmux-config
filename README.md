@@ -15,6 +15,8 @@ export PATH="$HOME/.smux/bin:$PATH"
 
 The installer links both tmux config locations to this checkout, installs `smux` and `tmux-bridge`, and installs the skill for Codex, Claude Code, Cursor, Gemini CLI, GitHub Copilot, OpenCode, and agents using the shared `.agents` directory. Existing files are moved to a timestamped directory under `~/.tmux/backups/`. Repeat installation is safe; keep this checkout in place because the installation uses symlinks.
 
+The installer saves missing `cod` (`codex --yolo`) and `cla` (`claude --dangerously-skip-permissions`) aliases for zsh, Bash, or sh, preserving existing definitions. For zsh configurations with an absolute `brew shellenv` startup line, it saves that generated setup in `~/.smux/homebrew.zsh` so new shells source it without launching Homebrew. The original shell file is backed up.
+
 Start a new agent conversation to load the updated skill. For all other agents supported by the [Skills CLI](https://github.com/vercel-labs/skills#supported-agents), install this repository's skill with:
 
 ```sh
@@ -32,6 +34,12 @@ git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 
 Skip the clone if TPM is already installed.
 
+## Saved agent sessions
+
+Snapshots retain window layouts, working directories, scrollback, and recorded agent identities. The installer adds a SessionStart hook to Claude Code and Codex without replacing existing hooks. The hook maps the agent process to its owning pane and records the exact session ID; the next snapshot saves `cod resume <ID> --no-daemon` or `cla --resume <ID>` in that pane's command field. Snapshot cleanup retains the newest five files and removes older files after seven days.
+
+Codex requires reviewing and trusting the new hook in `/hooks`. Use `cod --no-daemon` for automatic identity capture: a shared daemon is not owned by an individual pane, so the recorder refuses to guess its owner. Existing conversations must restart or resume with the hook enabled before their IDs can be recorded. A pane without a recorded ID opens the agent's session picker when its process is recognized; it never automatically chooses the latest chat. Only Claude Code and Codex have identity capture configured.
+
 ## Update
 
 ```sh
@@ -44,8 +52,8 @@ git pull --ff-only
 ## Agent panes
 
 ```sh
-smux pane -- codex 'Implement the assigned task'
-smux window -- claude 'Implement the assigned task'
+smux pane -- cod --no-daemon 'Implement the assigned task'
+smux window -- cla 'Implement the assigned task'
 smux stop %12
 smux close %12
 ```
@@ -61,6 +69,7 @@ Messaging retains the read → message → read → Enter workflow. Read permiss
 ```sh
 python3 tests/smux_test.py --rounds 20
 python3 tests/install_test.py
+python3 tests/agent_sessions_test.py
 python3 tests/benchmark.py --help
 ```
 

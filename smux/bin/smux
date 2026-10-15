@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -92,6 +93,8 @@ class Context:
     def create(self, args):
         shell = self.shell()
         command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if command and command[0] in ("cod", "cla"):
+            command = [shell, "-lic" if Path(shell).name == "sh" else "-ic", shlex.join(command)]
         if command:
             runner = Path(__file__).resolve().with_name("smux-run")
             launch = ["/bin/bash", str(runner), shell, *command]
