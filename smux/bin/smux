@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def tmux(socket, *args):
+    # tmux parses trailing semicolons even in argv; None is an intentional separator.
+    argv = [";" if arg is None else arg[:-1] + r"\;" if arg.endswith(";") else arg for arg in args]
+    result = subprocess.run(["tmux", "-S", socket, *argv], capture_output=True, text=True, check=False)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "tmux command failed")
+    return result.stdout.rstrip("\n")
+
+
+class Context:
+    def __init__(self, args):
+        inherited = os.environ.get("TMUX", "").rsplit(",", 2)
+        explicit = args.socket or os.environ.get("TMUX_BRIDGE_SOCKET")
+        self.socket = explicit or (inherited[0] if len(inherited) == 3 else "")
+        self.origin = args.origin or os.environ.get("TMUX_PANE", "")
+        if not self.socket or not re.fullmatch(r"%\d+", self.origin):
+            raise ValueError("need a tmux context; outside tmux use --socket PATH --from %N")
+        fields = ["pid", "start_time", "session_id", "window_id", "window_index",
+                  "pane_id", "pane_index", "pane_pid", "window_zoomed_flag",
+                  "pane_active", "@smux_owner", "@smux_shell", "default-shell",
+                  "pane_width", "pane_height", "pane_current_command", "q:pane_current_path", "@name"]
+        output = tmux(self.socket, "list-panes", "-a", "-F",
+                      "\t".join("#{" + field + "}" for field in fields))
+        self.panes = [dict(zip(fields, row.split("\t", len(fields) - 1)))
+                      for row in output.splitlines()]
+        origins = [p for p in self.panes if p["pane_id"] == self.origin]
+        if not explicit and len(inherited) == 3:
+            origins = [p for p in origins if p["pid"] == inherited[1]]
+        if len(origins) > 1 and len(inherited) == 3:
+            origins = [p for p in origins if p["session_id"] == "$" + inherited[2]]
+        if len(origins) != 1:
+            raise ValueError("caller pane is missing, stale, or linked to ambiguous sessions; refusing to guess")
+        self.pane = origins[0]
+        self.owner = self.origin + ":" + self.pane["pane_pid"]
+
+    def run(self, *args):
+        return tmux(self.socket, *args)
+
+    def resolve(self, target):
+        if re.fullmatch(r"%\d+", target):
+            matches = [p for p in self.panes if p["pane_id"] == target]
+        elif target.isdigit():
+            matches = [p for p in self.panes if p["window_id"] == self.pane["window_id"]
+                       and p["pane_index"] == target]
+        elif re.fullmatch(r"[^:]+:\d+\.\d+", target):
+            pane = self.run("display-message", "-p", "-t", "=" + target, "#{pane_id}")
+            matches = [p for p in self.panes if p["pane_id"] == pane]
+        else:
+            matches = [p for p in self.panes if p["window_id"] == self.pane["window_id"]
+                       and p["@name"] == target]
+        unique = {p["pane_id"]: p for p in matches}
+        if len(unique) != 1:
+            raise ValueError(f"target {target!r} is missing or ambiguous; use an exact %N from 'list --all'")
+        return next(iter(unique.values()))
+
+    def guard(self, pane):
+        identity = [os.path.realpath(self.socket), self.pane["pid"], self.pane["start_time"],
+                    self.owner, pane["pane_id"], pane["pane_pid"]]
+        directory = Path.home() / ".cache/smux/reads"
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        return directory / key
+
+    def consume_read(self, pane):
+        guard = self.guard(pane)
+        try:
+            age = time.time() - guard.stat().st_mtime
+            guard.unlink()
+        except FileNotFoundError:
+            age = float("inf")
+        if age > 300:
+            raise ValueError(f"read the pane first: tmux-bridge read {pane['pane_id']}")
+
+    def shell(self):
+        shell = self.pane["default-shell"]
+        if not Path(shell).is_file() or not os.access(shell, os.X_OK):
+            raise ValueError(f"default-shell is not executable: {shell}")
+        return shell
+
+    def create(self, args):
+        shell = self.shell()
+        command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if command:
+            runner = Path(__file__).resolve().with_name("smux-run")
+            launch = ["/bin/bash", str(runner), shell, *command]
+        else:
+            launch = [shell, "-l"]
+        if args.action == "pane":
+            operation = ["split-window", "-h", "-t", self.origin]
+        else:
+            operation = ["new-window", "-t", self.pane["session_id"] + ":"]
+        operation += ["-c", args.cwd or os.getcwd(), "-e", "PATH=" + os.environ.get("PATH", os.defpath), "-P", "-F",
+                      "#{pane_id} #{window_id} #{session_id}", "--", *launch]
+        created = self.run(*operation).split()
+        if len(created) != 3 or not re.fullmatch(r"%\d+", created[0]):
+            raise ValueError(f"unexpected tmux creation result: {created}")
+        pane, window_id, session = created
+        self.run("set-option", "-p", "-t", pane, "@smux_owner", self.owner,
+                 None, "set-option", "-p", "-t", pane, "@smux_shell", shell,
+                 None, "select-window", "-t", session + ":" + window_id,
+                 None, "select-pane", "-t", pane)
+        print(json.dumps({"pane": pane, "window": window_id, "session": session,
+                          "parent": self.origin}))
+
+    def finish(self, args):
+        if not re.fullmatch(r"%\d+", args.target):
+            raise ValueError("stop/close require the exact %N returned when creating the pane")
+        pane = self.resolve(args.target)
+        if pane["pane_id"] == self.origin or pane["@smux_owner"] != self.owner:
+            raise ValueError("can only stop/close a child created by this caller; caller and unrelated panes are protected")
+        if args.action == "stop":
+            shell = pane["@smux_shell"]
+            if not Path(shell).is_file() or not os.access(shell, os.X_OK):
+                raise ValueError("child's shell is no longer executable")
+            self.run("respawn-pane", "-k", "-t", pane["pane_id"], "--", shell, "-l")
+        else:
+            self.run("kill-pane", "-t", pane["pane_id"])
+
+
+def parser():
+    p = argparse.ArgumentParser(description="Caller-scoped tmux panes and agent messaging")
+    p.add_argument("--socket", help="explicit tmux socket; never scan other servers")
+    p.add_argument("--from", dest="origin", help="caller pane ID, e.g. %%3")
+    sub = p.add_subparsers(dest="action", required=True)
+    for action in ("pane", "window"):
+        command = sub.add_parser(action, help="open a child with a shell after its command exits")
+        command.add_argument("--cwd")
+        command.add_argument("command", nargs=argparse.REMAINDER)
+    for action in ("stop", "close", "resolve"):
+        sub.add_parser(action).add_argument("target")
+    listing = sub.add_parser("list")
+    listing.add_argument("--all", action="store_true", help="include other windows on this server")
+    read = sub.add_parser("read")
+    read.add_argument("target")
+    read.add_argument("lines", nargs="?", type=int, default=50)
+    for action in ("type", "message", "msg", "name"):
+        command = sub.add_parser(action)
+        command.add_argument("target")
+        command.add_argument("text")
+    keys = sub.add_parser("keys")
+    keys.add_argument("target")
+    keys.add_argument("keys", nargs="+")
+    for action in ("id", "doctor", "version", "install", "update"):
+        sub.add_parser(action)
+    return p
+
+
+def main():
+    args = parser().parse_args()
+    if args.action == "version":
+        print("smux / tmux-bridge 3.0.0")
+        return
+    if args.action in ("install", "update"):
+        installer = Path(__file__).resolve().parents[2] / "install.sh"
+        os.execv(str(installer), [str(installer)])
+    ctx = Context(args)
+    if args.action in ("pane", "window"):
+        ctx.create(args)
+    elif args.action in ("stop", "close"):
+        ctx.finish(args)
+    elif args.action == "id":
+        print(ctx.origin)
+    elif args.action == "doctor":
+        print(json.dumps({"socket": ctx.socket, "caller": ctx.origin,
+                          "session": ctx.pane["session_id"], "window": ctx.pane["window_id"],
+                          "zoomed": ctx.pane["window_zoomed_flag"] == "1"}))
+    elif args.action == "list":
+        print("PANE\tSESSION\tWINDOW\tINDEX\tACTIVE\tZOOMED\tSIZE\tPROCESS\tCWD\tLABEL")
+        for pane in ctx.panes:
+            if args.all or pane["window_id"] == ctx.pane["window_id"]:
+                size = pane["pane_width"] + "x" + pane["pane_height"]
+                values = [pane[key] for key in ["pane_id", "session_id", "window_id", "pane_index",
+                                                "pane_active", "window_zoomed_flag"]]
+                print("\t".join([*values, size, pane["pane_current_command"], pane["q:pane_current_path"], pane["@name"]]))
+    else:
+        pane = ctx.resolve(args.target)
+        target = pane["pane_id"]
+        if args.action == "resolve":
+            print(target)
+        elif args.action == "read":
+            if args.lines < 1:
+                raise ValueError("lines must be positive")
+            print(ctx.run("capture-pane", "-t", target, "-p", "-J", "-S", str(-args.lines)))
+            ctx.guard(pane).touch(mode=0o600)
+        elif args.action == "name":
+            if not args.text or any(ord(c) < 32 for c in args.text):
+                raise ValueError("label must be nonempty and contain no control characters")
+            if any(p["@name"] == args.text and p["window_id"] == pane["window_id"]
+                   and p["pane_id"] != target for p in ctx.panes):
+                raise ValueError("label already exists in this window")
+            ctx.run("set-option", "-p", "-t", target, "@name", args.text)
+        else:
+            ctx.consume_read(pane)
+            if args.action == "keys":
+                ctx.run("send-keys", "-t", target, "--", *args.keys)
+            else:
+                text = args.text
+                if args.action in ("message", "msg"):
+                    sender = ctx.pane["@name"] or ctx.origin
+                    text = f"[tmux-bridge from:{sender} pane:{ctx.origin}] {text}"
+                ctx.run("send-keys", "-t", target, "-l", "--", text)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError) as error:
+        sys.exit(f"error: {error}")

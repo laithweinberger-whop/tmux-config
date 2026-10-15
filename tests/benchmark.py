@@ -59,10 +59,11 @@ class Tmux:
         self.reader.start()
         self.wait(lambda: "/dev/" in self.cmd("list-clients -F '#{client_name}'"))
         shutil.copytree(repo / "scripts", self.root / ".tmux/scripts")
+        shutil.copytree(repo / "smux", self.root / ".smux")
         config = "\n".join(
             line for line in (repo / "tmux.conf").read_text().splitlines()
             if "autosave-loop" not in line and "~/.tmux/plugins/tpm/tpm" not in line
-        ).replace("~/.tmux", str(self.root / ".tmux"))
+        ).replace("~/.tmux", str(self.root / ".tmux")).replace("~/.smux", str(self.root / ".smux"))
         (self.root / "tmux.conf").write_text(config)
         self.cmd("source-file " + shlex.quote(str(self.root / "tmux.conf")))
         self.wait(lambda: self.cmd("display -p '#{E:@grid_layout}'"), timeout=30)

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -u
+shell=$1
+shift
+# An interrupt ends the foreground command, not the pane's shell wrapper.
+trap ':' INT
+"$@"
+exec "$shell" -l

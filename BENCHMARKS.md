@@ -39,3 +39,49 @@ sizing, growth to 34 panes, and closing a window while its cache was building.
 ```sh
 python3 tests/benchmark.py --rounds 200 --output /tmp/tmux-benchmark-results.json
 ```
+
+## Smux verification
+
+The smux regression suite uses two private tmux servers with overlapping `%N`
+IDs, multiple sessions, duplicate labels, and an active window different from
+the caller's. It verifies scoped resolution, fail-closed stale context, caller
+ownership, zoomed-pane creation, separate window creation without changing
+existing window indexes, working directory/PATH propagation, argument fidelity,
+read-guard isolation/expiry, and shell recovery after normal exit, Ctrl-C,
+missing executables, and explicit stop. Unrelated pane IDs and process IDs must
+remain identical. Installer tests cover backups, both config paths, CLI and skill
+symlinks, and repeat installation.
+
+Final 20-round run on macOS/tmux 3.7c (140 samples). These are full CLI wall times,
+including interpreter and tmux client startup, on a machine running other agents;
+they are not native key-binding latency or agent/model startup time.
+
+| Operation | Samples | Median | 95th percentile |
+| --- | ---: | ---: | ---: |
+| resolve | 20 | 530.21 ms | 1333.00 ms |
+| create pane | 20 | 1010.05 ms | 1866.50 ms |
+| stop into shell | 40 | 795.13 ms | 1595.74 ms |
+| close child pane | 40 | 781.59 ms | 1596.23 ms |
+| create window | 20 | 1044.95 ms | 1869.62 ms |
+
+On a separate 20-pane fixture, the installed old bridge's `list` took a median
+5,828.60 ms over 3 samples; the new `list --all` took 578.30 ms over 10 samples.
+The old command launched process-inspection tools for each pane; the new one
+uses tmux's own pane metadata in one snapshot. Earlier regression/timing runs
+also passed, including another 140 CLI samples and a 21-sample smoke run.
+
+With the smux base config included, the existing 25-window/100-pane UI benchmark
+passed another 392 samples. Median Shift-selection was 2.79 ms, split 3.78 ms,
+close/reflow 2.00 ms, and keyboard close 2.45 ms. First use of an uncached size
+still incurs Python startup (median 568.41 ms in this run). A separate integration
+check ran five pane and five window create/stop/close cycles with the real grid
+hooks and a PTY client, preserving all 12 original pane processes.
+
+The local installer was also applied to the running server without restarting
+it; all 53 existing pane IDs and process IDs were preserved.
+
+```sh
+python3 tests/smux_test.py --rounds 20
+python3 tests/install_test.py
+python3 tests/benchmark.py --rounds 50 --windows 25
+```
