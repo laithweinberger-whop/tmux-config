@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""
-Rebuilds a window's pane layout into the capped 2-row grid, growing
-columns to the right, columns prioritized over rows. Applies the whole
-target layout as a SINGLE atomic `select-layout` call (see
-grid_layout.py) so there's exactly one redraw -- no visible intermediate
-rearrangement, and no pane is ever broken out/killed/recreated.
-"""
 import os
 import sys
 
@@ -14,10 +7,13 @@ import grid_layout
 
 
 def main():
+    if sys.argv[1:] == ["--cache-all"]:
+        grid_layout.cache_all_layouts()
+        return
     win = sys.argv[1] if len(sys.argv) > 1 else grid_layout.tmux(
         "display-message", "-p", "#{window_id}"
     ).strip()
-    grid_layout.apply_grid_layout(win)
+    grid_layout.apply_grid_layout(win, *sys.argv[2:])
 
 
 if __name__ == "__main__":
