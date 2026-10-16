@@ -60,7 +60,7 @@ smux close %12
 
 Creation returns JSON containing the exact pane ID. `pane` opens in the caller's window; `window` explicitly creates a new window in the same session. Both bring the new pane into view in that session. Commands return to a shell on normal exit or Ctrl-C. `stop` terminates the child process and replaces it with a fresh shell in the same pane; `close` removes only that pane. Neither accepts the caller's own pane or children owned by another caller.
 
-The caller is determined by `TMUX` and `TMUX_PANE`, not the currently selected window. Outside tmux use `smux --socket PATH --from %N …`. Labels and numeric indexes are local to that caller's window; use an exact `%N` to address another window. Missing context or ambiguous targets fail without guessing.
+The caller is determined by `TMUX` and `TMUX_PANE`, with process ancestry verifying that the inherited pane owns the caller. Shared agent daemons can inherit another chat's pane ID even while that pane still exists; this unverified context fails before creating anything. Identify the actual chat's pane, then use `smux --socket PATH --from %N …`. The explicit target is also required outside tmux. Labels and numeric indexes are local to that caller's window; use an exact `%N` to address another window. Missing context or ambiguous targets fail without guessing.
 
 Messaging retains the read → message → read → Enter workflow. Read permissions are scoped to caller, server, and target process. Agent guidance calls for assignments, blockers/questions, and results, without routine status nudges or acknowledgement loops. See [the skill](skills/smux/SKILL.md).
 

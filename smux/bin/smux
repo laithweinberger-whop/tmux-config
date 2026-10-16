@@ -44,6 +44,17 @@ class Context:
         if len(origins) != 1:
             raise ValueError("caller pane is missing, stale, or linked to ambiguous sessions; refusing to guess")
         self.pane = origins[0]
+        if not args.origin:
+            parents = dict(line.split() for line in subprocess.check_output(
+                ["ps", "-axo", "pid=,ppid="], text=True).splitlines())
+            pid = str(os.getpid())
+            ancestors = set()
+            while pid in parents and pid not in ancestors:
+                ancestors.add(pid)
+                pid = parents[pid]
+            if self.pane["pane_pid"] not in ancestors:
+                raise ValueError("inherited TMUX_PANE does not own this process (shared agent daemons can carry stale IDs); "
+                                 "identify this chat's pane using tmux list-panes -a, then pass --from %N explicitly")
         self.owner = self.origin + ":" + self.pane["pane_pid"]
 
     def run(self, *args):

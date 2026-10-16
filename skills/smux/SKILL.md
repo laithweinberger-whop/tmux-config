@@ -36,13 +36,17 @@ SessionStart hooks record exact Claude/Codex conversation IDs against the owning
 
 ## Context and targets
 
-The CLI uses `TMUX` plus `TMUX_PANE`. It never scans servers or guesses an active window. Outside tmux, establish the intended socket and caller explicitly:
+The CLI uses `TMUX` plus `TMUX_PANE` only when the caller process descends from that pane. Shared agent daemons can inherit another chat's still-valid pane ID; `doctor` and creation now reject that unverified context. Never copy the rejected ID into `--from`. Identify the current chat by matching its title, task context, and attached session in `tmux list-panes -a` and `tmux list-clients`, then pass that verified pane explicitly. If it is ambiguous, ask the user for the target. Do not guess from the working directory or choose whichever client is active.
+
+The CLI never scans servers or guesses an active window. Outside tmux, or when using a shared daemon, establish the intended socket and caller explicitly:
 
 ```bash
 smux --socket /path/to/socket --from %3 pane -- cod --no-daemon 'Task'
 ```
 
 The same global options work with `tmux-bridge`. A missing or stale context is an error; obtain the intended caller instead of substituting an arbitrary active pane.
+
+After creation, verify the returned session/window match the established parent, the new pane is selected, and the window is unzoomed. A successful launch in a different session does not make the pane visible to the user.
 
 - `%N`: exact pane on this server, including another window.
 - Labels and numeric pane indexes: scoped to the caller's window. Ambiguous labels fail.

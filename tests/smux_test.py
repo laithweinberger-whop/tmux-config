@@ -26,8 +26,10 @@ class Server:
     def tmux(self, *args):
         return subprocess.check_output(["tmux", "-S", self.socket, *args], text=True).strip()
 
-    def cli(self, *args, env=None, ok=True):
-        result = subprocess.run([str(CLI), *args], env=env or self.env, capture_output=True, text=True, check=False)
+    def cli(self, *args, env=None, ok=True, implicit=False):
+        env = env or self.env
+        origin = [] if implicit or "--from" in args else ["--from", env["TMUX_PANE"]]
+        result = subprocess.run([str(CLI), *origin, *args], env=env, capture_output=True, text=True, check=False)
         assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
         return result.stdout.strip() if ok else result.stderr
 
@@ -64,8 +66,36 @@ def regressions(a, b, root):
     a.cli("resolve", "%99999", ok=False)
     for env in (dict(a.env, TMUX=""), dict(a.env, TMUX_PANE="%99999"),
                 dict(a.env, TMUX=a.socket + ",1,0"), dict(a.env, TMUX_BRIDGE_SOCKET=str(root / "missing"))):
-        a.cli("pane", env=env, ok=False)
+        a.cli("pane", env=env, ok=False, implicit=True)
+    for action in ("pane", "window", "doctor"):
+        assert "does not own this process" in a.cli(action, implicit=True, ok=False)
+    assert a.panes() == original
     assert a.cli("--socket", a.socket, "--from", "%0", "id", env=dict(a.env, TMUX="", TMUX_PANE="")) == "%0"
+    probe = root / "inherited-context.py"
+    result_path = root / "inherited-context.json"
+    probe.write_text('''import json, os, subprocess, sys
+cli, output = sys.argv[1:]
+def run(*args, env=None):
+    result = subprocess.run([cli, *args], env=env, capture_output=True, text=True)
+    return {"code": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr}
+result = {"id": run("id"), "stale": run("pane", env=dict(os.environ, TMUX_PANE="%0"))}
+result["child"] = run("pane")
+if result["child"]["code"] == 0:
+    result["close"] = run("close", json.loads(result["child"]["stdout"])["pane"])
+with open(output, "w") as file:
+    json.dump(result, file)
+''')
+    probe_pane = json.loads(a.cli("pane", "--", "/usr/bin/python3", str(probe), str(CLI), str(result_path)))["pane"]
+    deadline = time.monotonic() + 10
+    while not result_path.exists() and time.monotonic() < deadline:
+        time.sleep(.05)
+    result = json.loads(result_path.read_text())
+    assert result["id"]["code"] == 0 and result["id"]["stdout"] == probe_pane, result
+    assert result["stale"]["code"] != 0 and "does not own this process" in result["stale"]["stderr"], result
+    assert result["child"]["code"] == 0 and json.loads(result["child"]["stdout"])["parent"] == probe_pane, result
+    assert result["close"]["code"] == 0, result
+    a.cli("close", probe_pane)
+    assert a.panes() == original
     child = json.loads(a.cli("pane", "--", "/bin/sleep", "30"))
     assert child["window"] == "@0" and child["session"] == "$0"
     pane = child["pane"]
