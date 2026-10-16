@@ -47,11 +47,11 @@ class Context:
         if not args.origin:
             parents = dict(line.split() for line in subprocess.check_output(
                 ["ps", "-axo", "pid=,ppid="], text=True).splitlines())
-            pid = str(os.getpid())
             ancestors = set()
-            while pid in parents and pid not in ancestors:
-                ancestors.add(pid)
-                pid = parents[pid]
+            for pid in (str(os.getpid()), os.environ.get("SMUX_CODEX_PID", "")):
+                while pid in parents and pid not in ancestors:
+                    ancestors.add(pid)
+                    pid = parents[pid]
             if self.pane["pane_pid"] not in ancestors:
                 raise ValueError("inherited TMUX_PANE does not own this process (shared agent daemons can carry stale IDs); "
                                  "identify this chat's pane using tmux list-panes -a, then pass --from %N explicitly")

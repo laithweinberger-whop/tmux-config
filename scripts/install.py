@@ -37,7 +37,7 @@ def main():
     for script in (repo / "scripts").iterdir():
         if script.suffix in (".sh", ".py") and script.name != "install.py":
             link(script, home / ".tmux/scripts" / script.name)
-    for name in ("smux", "tmux-bridge", "smux-run"):
+    for name in ("smux", "tmux-bridge", "smux-run", "codex"):
         link(repo / "smux/bin" / name, home / ".smux/bin" / name)
     link(repo / "skills/smux", home / ".agents/skills/smux")
     for directory in (".codex", ".claude", ".cursor", ".gemini", ".copilot", ".config/opencode", ".config/agents"):

@@ -36,9 +36,11 @@ SessionStart hooks record exact Claude/Codex conversation IDs against the owning
 
 ## Context and targets
 
-The CLI uses `TMUX` plus `TMUX_PANE` only when the caller process descends from that pane. Shared agent daemons can inherit another chat's still-valid pane ID; `doctor` and creation now reject that unverified context. Never copy the rejected ID into `--from`. Identify the current chat by matching its title, task context, and attached session in `tmux list-panes -a` and `tmux list-clients`, then pass that verified pane explicitly. If it is ambiguous, ask the user for the target. Do not guess from the working directory or choose whichever client is active.
+The installed `codex` launcher passes the launching pane's `TMUX`, `TMUX_PANE`, and Codex process ID through per-chat `shell_environment_policy.set` overrides. Each chat's commands receive their own pane context even when Codex uses a shared daemon. Existing `cod` aliases that invoke `codex` use this automatically; existing chats need to be resumed through the launcher to acquire it. Absolute-path invocations of the original Codex executable bypass the launcher.
 
-The CLI never scans servers or guesses an active window. Outside tmux, or when using a shared daemon, establish the intended socket and caller explicitly:
+The CLI verifies that either its own process or the per-chat Codex process belongs to the claimed pane. Older shared-daemon chats may still carry unverified IDs and receive an error. Never copy the rejected ID into `--from`. Identify the current chat by matching its title, task context, and attached session in `tmux list-panes -a` and `tmux list-clients`, then pass that verified pane explicitly. If it is ambiguous, ask the user for the target. Do not guess from the working directory or choose whichever client is active.
+
+The CLI never scans servers or guesses an active window. Outside tmux, or for an older chat without propagated context, establish the intended socket and caller explicitly:
 
 ```bash
 smux --socket /path/to/socket --from %3 pane -- cod --no-daemon 'Task'

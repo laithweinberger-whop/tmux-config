@@ -40,6 +40,7 @@ with tempfile.TemporaryDirectory(prefix="smux-install-") as directory:
     for binary in ("smux", "tmux-bridge"):
         assert "3.0.0" in subprocess.check_output([str(home / ".smux/bin" / binary), "version"], env=env, text=True)
     assert (home / ".tmux/scripts/reflow-grid.sh").resolve() == REPO / "scripts/reflow-grid.sh"
+    assert (home / ".smux/bin/codex").resolve() == REPO / "smux/bin/codex"
     for agent, file in (("claude", "settings.json"), ("codex", "hooks.json")):
         groups = json.loads((home / ("." + agent) / file).read_text())["hooks"]["SessionStart"]
         assert len(groups) == 2

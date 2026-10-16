@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main():
+    launcher = Path(__file__).resolve()
+    executable = next((candidate for directory in os.get_exec_path()
+                       if (candidate := shutil.which("codex", path=directory))
+                       and Path(candidate).resolve() != launcher), None)
+    if not executable:
+        sys.exit("smux: install Codex first; no codex executable found after the tmux launcher")
+    options = []
+    context = os.environ.get("TMUX", "")
+    pane = os.environ.get("TMUX_PANE", "")
+    if context and pane and not any(arg == "--remote" or arg.startswith("--remote=") for arg in sys.argv[1:]):
+        socket = context.rsplit(",", 2)[0]
+        result = subprocess.run(["tmux", "-S", socket, "display-message", "-p", "-t", pane,
+                                 "#{pane_pid}"], capture_output=True, text=True)
+        parents = dict(line.split() for line in subprocess.check_output(
+            ["ps", "-axo", "pid=,ppid="], text=True).splitlines())
+        pid = str(os.getpid())
+        ancestors = set()
+        while pid in parents and pid not in ancestors:
+            ancestors.add(pid)
+            pid = parents[pid]
+        if result.returncode == 0 and result.stdout.strip() in ancestors:
+            for name, value in {"TMUX": context, "TMUX_PANE": pane, "SMUX_CODEX_PID": str(os.getpid())}.items():
+                options.extend(["-c", "shell_environment_policy.set." + name + "=" + json.dumps(value)])
+    os.execv(executable, [executable, *options, *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    main()
