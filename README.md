@@ -51,7 +51,7 @@ git pull --ff-only
 
 ## Agent panes
 
-Press **Option + −** to move the selected pane into the same session's **minimized** window. The window is created on first use and reused thereafter. The pane's running process stays alive, and focus stays in the original window. Minimizing its last pane leaves a fresh terminal behind. Use **Option + U/H** or **Ctrl+B, W** to visit the minimized window. Pressing the shortcut inside that window does nothing.
+Press **Option + −** to move the selected pane into the same session's **Minimized** window. The window is created on first use and reused thereafter. The pane's running process stays alive, and focus stays in the original window. Minimizing its last pane leaves a fresh terminal behind. Use **Option + U/H** or **Ctrl+B, W** to visit the minimized window. Press **Option + +** (or **Option + =**) on a pane in **Minimized** to return it to its recorded original window and select it. Renaming the original window does not break the association; if it was closed, a window with its saved name is recreated. The empty Minimized window disappears after its last pane is restored.
 
 ```sh
 smux pane -- cod --no-daemon 'Implement the assigned task'
