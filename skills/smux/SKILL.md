@@ -13,6 +13,8 @@ Use `cod` for `codex --yolo` and `cla` for `claude --dangerously-skip-permission
 
 ## Create, stop, and close
 
+**Option + −** moves the selected pane into a shared `minimized` window in the same session, creating it if needed. It preserves the running process and keeps focus in the original window, leaving a fresh terminal if its last pane is moved. Switch windows to revisit minimized panes; the shortcut does nothing inside `minimized`.
+
 ```bash
 smux pane -- cla 'Implement the assigned task'
 smux pane -- cod --no-daemon 'Implement the assigned task'

@@ -51,6 +51,8 @@ git pull --ff-only
 
 ## Agent panes
 
+Press **Option + −** to move the selected pane into the same session's **minimized** window. The window is created on first use and reused thereafter. The pane's running process stays alive, and focus stays in the original window. Minimizing its last pane leaves a fresh terminal behind. Use **Option + U/H** or **Ctrl+B, W** to visit the minimized window. Pressing the shortcut inside that window does nothing.
+
 ```sh
 smux pane -- cod --no-daemon 'Implement the assigned task'
 smux window -- cla 'Implement the assigned task'
@@ -72,6 +74,7 @@ Messaging retains the read → message → read → Enter workflow. Read permiss
 python3 tests/smux_test.py --rounds 20
 python3 tests/install_test.py
 python3 tests/agent_sessions_test.py
+python3 tests/minimize_pane_test.py
 python3 tests/codex_launcher_test.py
 python3 tests/codex_launcher_test.py /absolute/path/to/original/codex
 python3 tests/benchmark.py --help
